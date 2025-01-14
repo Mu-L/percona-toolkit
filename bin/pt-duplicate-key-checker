@@ -39,7 +39,7 @@ BEGIN {
 {
 package Percona::Toolkit;
 
-our $VERSION = '3.5.1';
+our $VERSION = '3.7.0';
 
 use strict;
 use warnings FATAL => 'all';
@@ -133,7 +133,10 @@ sub quote_val {
    return $val if $val =~ m/^0x[0-9a-fA-F]+$/  # quote hex data
                   && !$args{is_char};          # unless is_char is true
 
-   return $val if $args{is_float};
+   if ( $args{is_float} ) {
+      return sprintf("%.17g", $val) if $val - "$val" != 0;
+      return $val;
+   }
 
    $val =~ s/(['\\])/\\$1/g;
    return "'$val'";
@@ -152,7 +155,7 @@ sub split_unquote {
       s/`\z//;
       s/``/`/g;
    }
-   
+
    return ($db, $tbl);
 }
 
@@ -310,13 +313,15 @@ sub get_create_table {
    eval { $href = $dbh->selectrow_hashref($show_sql); };
    if ( my $e = $EVAL_ERROR ) {
       PTDEBUG && _d($old_sql_mode);
-      $dbh->do($old_sql_mode);
+      eval { $dbh->do($old_sql_mode); };
+      PTDEBUG && $EVAL_ERROR && _d($EVAL_ERROR);
 
       die $e;
    }
 
    PTDEBUG && _d($old_sql_mode);
-   $dbh->do($old_sql_mode);
+   eval { $dbh->do($old_sql_mode); };
+   PTDEBUG && $EVAL_ERROR && _d($EVAL_ERROR);
 
    my ($key) = grep { m/create (?:table|view)/i } keys %$href;
    if ( !$key ) {
@@ -345,7 +350,7 @@ sub parse {
 
    my $engine = $self->get_engine($ddl);
 
-   my @defs   = $ddl =~ m/^(\s+`.*?),?$/gm;
+   my @defs = $ddl =~ m/(?:(?<=,\n)|(?<=\(\n))(\s+`(?:.|\n)+?`.+?),?\n/g;
    my @cols   = map { $_ =~ m/`([^`]+)`/ } @defs;
    PTDEBUG && _d('Table cols:', join(', ', map { "`$_`" } @cols));
 
@@ -406,9 +411,9 @@ sub parse {
 sub remove_quoted_text {
    my ($string) = @_;
    $string =~ s/\\['"]//g;
-   $string =~ s/`[^`]*?`//g; 
-   $string =~ s/"[^"]*?"//g; 
-   $string =~ s/'[^']*?'//g; 
+   $string =~ s/`[^`]*?`//g;
+   $string =~ s/"[^"]*?"//g;
+   $string =~ s/'[^']*?'//g;
    return $string;
 }
 
@@ -485,10 +490,28 @@ sub check_table {
    }
    my ($dbh, $db, $tbl) = @args{@required_args};
    my $q      = $self->{Quoter} || 'Quoter';
+   $self->{check_table_error} = undef;
+
+
+   my $lctn_sql = 'SELECT @@lower_case_table_names';
+   PTDEBUG && _d($lctn_sql);
+
+   my $lower_case_table_names;
+   eval { ($lower_case_table_names) = $dbh->selectrow_array($lctn_sql); };
+   if ( $EVAL_ERROR ) {
+      PTDEBUG && _d($EVAL_ERROR);
+      $self->{check_table_error} = $EVAL_ERROR;
+      return 0;
+   }
+
+   PTDEBUG && _d("lower_case_table_names=$lower_case_table_names");
+   if ($lower_case_table_names > 0) {
+       PTDEBUG && _d("MySQL uses case-insensitive lookup, converting '$tbl' to lowercase");
+       $tbl = lc $tbl;
+   }
+
    my $db_tbl = $q->quote($db, $tbl);
    PTDEBUG && _d('Checking', $db_tbl);
-
-   $self->{check_table_error} = undef;
 
    my $sql = "SHOW TABLES FROM " . $q->quote($db)
            . ' LIKE ' . $q->literal_like($tbl);
@@ -526,8 +549,7 @@ sub get_keys {
    my $clustered_key = undef;
 
    KEY:
-   foreach my $key ( $ddl =~ m/^  ((?:[A-Z]+ )?KEY .*)$/gm ) {
-
+   foreach my $key ( $ddl =~ m/^  ((?:[A-Z]+ )?KEY [\s\S]*?\),?.*)$/gm ) {
       next KEY if $key =~ m/FOREIGN/;
 
       my $key_ddl = $key;
@@ -537,7 +559,7 @@ sub get_keys {
          $key =~ s/USING HASH/USING BTREE/;
       }
 
-      my ( $type, $cols ) = $key =~ m/(?:USING (\w+))? \((.+)\)/;
+      my ( $type, $cols ) = $key =~ m/(?:USING (\w+))? \(([\s\S]+)\)/;
       my ( $special ) = $key =~ m/(FULLTEXT|SPATIAL)/;
       $type = $type || $special || 'BTREE';
       my ($name) = $key =~ m/(PRIMARY|`[^`]*`)/;
@@ -565,7 +587,7 @@ sub get_keys {
          ddl          => $key_ddl,
       };
 
-      if ( ($engine || '') =~ m/InnoDB/i && !$clustered_key ) {
+      if ( ($engine || '') =~ m/(InnoDB)|(TokuDB)|(RocksDB)/i && !$clustered_key ) {
          my $this_key = $keys->{$name};
          if ( $this_key->{name} eq 'PRIMARY' ) {
             $clustered_key = 'PRIMARY';
@@ -767,7 +789,7 @@ sub parse {
    foreach my $key ( keys %$opts ) {
       PTDEBUG && _d('Finding value for', $key);
       $final_props{$key} = $given_props{$key};
-      if ( !defined $final_props{$key}  
+      if ( !defined $final_props{$key}
            && defined $prev->{$key} && $opts->{$key}->{copy} )
       {
          $final_props{$key} = $prev->{$key};
@@ -855,7 +877,7 @@ sub get_cxn_params {
       $dsn = 'DBI:mysql:' . ( $info->{D} || '' ) . ';'
          . join(';', map  { "$opts{$_}->{dsn}=$info->{$_}" }
                      grep { defined $info->{$_} }
-                     qw(F h P S A))
+                     qw(F h P S A s))
          . ';mysql_read_default_group=client'
          . ($info->{L} ? ';mysql_local_infile=1' : '');
    }
@@ -907,7 +929,7 @@ sub get_dbh {
    my $dbh;
    my $tries = 2;
    while ( !$dbh && $tries-- ) {
-      PTDEBUG && _d($cxn_string, ' ', $user, ' ', $pass, 
+      PTDEBUG && _d($cxn_string, ' ', $user, ' ', $pass,
          join(', ', map { "$_=>$defaults->{$_}" } keys %$defaults ));
 
       $dbh = eval { DBI->connect($cxn_string, $user, $pass, $defaults) };
@@ -920,7 +942,7 @@ sub get_dbh {
                . "DBD::mysql is not installed, try:\n"
                . "  Debian/Ubuntu  apt-get install libdbd-mysql-perl\n"
                . "  RHEL/CentOS    yum install perl-DBD-MySQL\n"
-               . "  OpenSolaris    pgk install pkg:/SUNWapu13dbd-mysql\n";
+               . "  OpenSolaris    pkg install pkg:/SUNWapu13dbd-mysql\n";
          }
          elsif ( $EVAL_ERROR =~ m/not a compiled character set|character set utf8/ ) {
             PTDEBUG && _d('Going to try again without utf8 support');
@@ -935,21 +957,48 @@ sub get_dbh {
    if ( $cxn_string =~ m/mysql/i ) {
       my $sql;
 
-      if ( my ($charset) = $cxn_string =~ m/charset=([\w]+)/ ) {
+      my ($charset) = $cxn_string =~ m/charset=([\w]+)/;
+      if ( $charset ) {
          $sql = qq{/*!40101 SET NAMES "$charset"*/};
          PTDEBUG && _d($dbh, $sql);
          eval { $dbh->do($sql) };
          if ( $EVAL_ERROR ) {
             die "Error setting NAMES to $charset: $EVAL_ERROR";
          }
-         PTDEBUG && _d('Enabling charset for STDOUT');
-         if ( $charset eq 'utf8' ) {
-            binmode(STDOUT, ':utf8')
-               or die "Can't binmode(STDOUT, ':utf8'): $OS_ERROR";
+      }
+      else {
+         my ($mysql_version) = eval { $dbh->selectrow_array('SELECT VERSION()') };
+         if ( $EVAL_ERROR ) {
+            die "Cannot get MySQL version: $EVAL_ERROR";
          }
-         else {
-            binmode(STDOUT) or die "Can't binmode(STDOUT): $OS_ERROR";
+         my (undef, $character_set_server) = eval { $dbh->selectrow_array("SHOW VARIABLES LIKE 'character_set_server'") };
+         if ( $EVAL_ERROR ) {
+            die "Cannot get MySQL var character_set_server: $EVAL_ERROR";
          }
+
+         if ( $mysql_version =~ m/^(\d+)\.(\d)\.(\d+).*/ ) {
+            if ( $1 >= 8 && $character_set_server =~ m/^utf8/ ) {
+               $dbh->{mysql_enable_utf8} = 1;
+               $charset = $character_set_server;
+               my $msg = "MySQL version $mysql_version >= 8 and character_set_server = $character_set_server\n".
+                        "Setting: SET NAMES $character_set_server";
+               PTDEBUG && _d($msg);
+               eval { $dbh->do("SET NAMES '$character_set_server'") };
+               if ( $EVAL_ERROR ) {
+                  die "Cannot SET NAMES $character_set_server: $EVAL_ERROR";
+               }
+            }
+         }
+      }
+      PTDEBUG && _d('Enabling charset for STDOUT');
+      if ( $charset && $charset =~ m/^utf8/ ) {
+         binmode(STDOUT, ':utf8')
+            or die "Can't binmode(STDOUT, ':utf8'): $OS_ERROR";
+         binmode(STDERR, ':utf8')
+            or die "Can't binmode(STDERR, ':utf8'): $OS_ERROR";
+      }
+      else {
+         binmode(STDOUT) or die "Can't binmode(STDOUT): $OS_ERROR";
       }
 
       if ( my $vars = $self->prop('set-vars') ) {
@@ -974,28 +1023,6 @@ sub get_dbh {
            . ($sql_mode ? " and $sql_mode" : '')
            . ": $EVAL_ERROR";
       }
-   }
-   my ($mysql_version) = eval { $dbh->selectrow_array('SELECT VERSION()') };
-   if ($EVAL_ERROR) {
-       die "Cannot get MySQL version: $EVAL_ERROR";
-   }
-
-   my (undef, $character_set_server) = eval { $dbh->selectrow_array("SHOW VARIABLES LIKE 'character_set_server'") };
-   if ($EVAL_ERROR) {
-       die "Cannot get MySQL var character_set_server: $EVAL_ERROR";
-   }
-
-   if ($mysql_version =~ m/^(\d+)\.(\d)\.(\d+).*/) {
-       if ($1 >= 8 && $character_set_server =~ m/^utf8/) {
-           $dbh->{mysql_enable_utf8} = 1;
-           my $msg = "MySQL version $mysql_version >= 8 and character_set_server = $character_set_server\n".
-                     "Setting: SET NAMES $character_set_server";
-           PTDEBUG && _d($msg);
-           eval { $dbh->do("SET NAMES 'utf8mb4'") };
-           if ($EVAL_ERROR) {
-               die "Cannot SET NAMES $character_set_server: $EVAL_ERROR";
-           }
-       }
    }
 
    PTDEBUG && _d('DBH info: ',
@@ -1105,7 +1132,7 @@ sub set_vars {
       }
    }
 
-   return; 
+   return;
 }
 
 sub _d {
@@ -1186,7 +1213,7 @@ sub new {
       rules             => [],  # desc of rules for --help
       mutex             => [],  # rule: opts are mutually exclusive
       atleast1          => [],  # rule: at least one opt is required
-      disables          => {},  # rule: opt disables other opts 
+      disables          => {},  # rule: opt disables other opts
       defaults_to       => {},  # rule: opt defaults to value of other opt
       DSNParser         => undef,
       default_files     => [
@@ -1349,7 +1376,7 @@ sub _pod_to_specs {
          }
 
          push @specs, {
-            spec  => $self->{parse_attributes}->($self, $option, \%attribs), 
+            spec  => $self->{parse_attributes}->($self, $option, \%attribs),
             desc  => $para
                . (defined $attribs{default} ? " (default $attribs{default})" : ''),
             group => ($attribs{'group'} ? $attribs{'group'} : 'default'),
@@ -1440,7 +1467,7 @@ sub _parse_specs {
          $self->{opts}->{$long} = $opt;
       }
       else { # It's an option rule, not a spec.
-         PTDEBUG && _d('Parsing rule:', $opt); 
+         PTDEBUG && _d('Parsing rule:', $opt);
          push @{$self->{rules}}, $opt;
          my @participants = $self->_get_participants($opt);
          my $rule_ok = 0;
@@ -1485,7 +1512,7 @@ sub _parse_specs {
       PTDEBUG && _d('Option', $long, 'disables', @participants);
    }
 
-   return; 
+   return;
 }
 
 sub _get_participants {
@@ -1572,7 +1599,7 @@ sub _set_option {
 }
 
 sub get_opts {
-   my ( $self ) = @_; 
+   my ( $self ) = @_;
 
    foreach my $long ( keys %{$self->{opts}} ) {
       $self->{opts}->{$long}->{got} = 0;
@@ -1703,7 +1730,7 @@ sub _check_opts {
                   else {
                      $err = join(', ',
                                map { "--$self->{opts}->{$_}->{long}" }
-                               grep { $_ } 
+                               grep { $_ }
                                @restricted_opts[0..scalar(@restricted_opts) - 2]
                             )
                           . ' or --'.$self->{opts}->{$restricted_opts[-1]}->{long};
@@ -1713,7 +1740,7 @@ sub _check_opts {
             }
 
          }
-         elsif ( $opt->{is_required} ) { 
+         elsif ( $opt->{is_required} ) {
             $self->save_error("Required option --$long must be specified");
          }
 
@@ -2097,7 +2124,7 @@ sub clone {
       $clone{$scalar} = $self->{$scalar};
    }
 
-   return bless \%clone;     
+   return bless \%clone;
 }
 
 sub _parse_size {
@@ -2434,7 +2461,7 @@ sub get_duplicate_keys {
       if ( $args{ignore_order} || $is_fulltext  ) {
          my $ordered_cols = join(',', sort(split(/,/, $key->{colnames})));
          PTDEBUG && _d('Reordered', $key->{name}, 'cols from',
-            $key->{colnames}, 'to', $ordered_cols); 
+            $key->{colnames}, 'to', $ordered_cols);
          $key->{colnames} = $ordered_cols;
       }
 
@@ -2442,7 +2469,7 @@ sub get_duplicate_keys {
       if ( !$args{ignore_structure} ) {
          $push_to = \@fulltext_keys if $is_fulltext;
       }
-      push @$push_to, $key; 
+      push @$push_to, $key;
    }
 
    push @normal_keys, $self->unconstrain_keys($primary_key, \@unique_keys);
@@ -2477,7 +2504,10 @@ sub get_duplicate_keys {
    if ( $clustered_key
         && $args{clustered}
         && $args{tbl_info}->{engine}
-        && $args{tbl_info}->{engine} =~ m/InnoDB/i )
+        && ( $args{tbl_info}->{engine} =~ m/InnoDB/i
+           || $args{tbl_info}->{engine} =~ m/TokuDB/i
+           || $args{tbl_info}->{engine} =~ m/RocksDB/i )
+        )
    {
       PTDEBUG && _d('Removing UNIQUE dupes of clustered key');
       push @dupes,
@@ -2565,7 +2595,7 @@ sub remove_prefix_duplicates {
       @$left_keys = reverse sort { lc($a->{colnames}) cmp lc($b->{colnames}) }
                     grep { defined $_; }
                     @$left_keys;
-      
+
       $last_left_key = scalar(@$left_keys) - 2;
 
       $right_offset = 1;
@@ -2609,7 +2639,7 @@ sub remove_prefix_duplicates {
             if ( my $type = $right_keys->[$right_index]->{unconstrained} ) {
                $reason .= "Uniqueness of $right_name ignored because "
                   . $right_keys->[$right_index]->{constraining_key}->{name}
-                  . " is a $type constraint\n"; 
+                  . " is a $type constraint\n";
             }
             my $exact_dupe = $right_len_cols < $left_len_cols ? 0 : 1;
             $reason .= $right_name
@@ -2816,6 +2846,7 @@ sub new {
       force_log_file => $args{force_log_file},
       parent_exit    => $args{parent_exit},
       pid_file_owner => 0,
+      utf8           => $args{utf8} // 0,
    };
    return bless $self, $class;
 }
@@ -2828,6 +2859,7 @@ sub run {
    my $log_file       = $self->{log_file};
    my $force_log_file = $self->{force_log_file};
    my $parent_exit    = $self->{parent_exit};
+   my $utf8           = $self->{utf8};
 
    PTDEBUG && _d('Starting daemon');
 
@@ -2851,7 +2883,7 @@ sub run {
          $parent_exit->($child_pid) if $parent_exit;
          exit 0;
       }
- 
+
       POSIX::setsid() or die "Cannot start a new session: $OS_ERROR";
       chdir '/'       or die "Cannot chdir to /: $OS_ERROR";
 
@@ -2874,10 +2906,19 @@ sub run {
          close STDOUT;
          open  STDOUT, '>>', $log_file
             or die "Cannot open log file $log_file: $OS_ERROR";
+         if ( $utf8 ) {
+            binmode(STDOUT, ':utf8')
+               or die "Can't binmode(STDOUT, ':utf8'): $OS_ERROR";
+         }
+
 
          close STDERR;
          open  STDERR, ">&STDOUT"
-            or die "Cannot dupe STDERR to STDOUT: $OS_ERROR"; 
+            or die "Cannot dupe STDERR to STDOUT: $OS_ERROR";
+         if ( $utf8 ) {
+            binmode(STDERR, ':utf8')
+               or die "Can't binmode(STDERR, ':utf8'): $OS_ERROR";
+         }
       }
       else {
          if ( -t STDOUT ) {
@@ -2915,7 +2956,7 @@ sub _make_pid_file {
    eval {
       sysopen(PID_FH, $pid_file, O_RDWR|O_CREAT|O_EXCL) or die $OS_ERROR;
       print PID_FH $PID, "\n";
-      close PID_FH; 
+      close PID_FH;
    };
    if ( my $e = $EVAL_ERROR ) {
       if ( $e =~ m/file exists/i ) {
@@ -3937,7 +3978,10 @@ sub _split_url {
          or croak(qq/Could not binmode() socket: '$!'/);
 
        if ( $scheme eq 'https') {
-           IO::Socket::SSL->start_SSL($self->{fh});
+           IO::Socket::SSL->start_SSL(
+              $self->{fh},
+              SSL_verifycn_name => $host,
+           );
            ref($self->{fh}) eq 'IO::Socket::SSL'
                or die(qq/SSL connection failed for $host\n/);
            if ( $self->{fh}->can("verify_hostname") ) {
@@ -3950,7 +3994,7 @@ sub _split_url {
                   or die(qq/SSL certificate not valid for $host\n/);
             }
        }
-         
+
        $self->{host} = $host;
        $self->{port} = $port;
 
@@ -4116,7 +4160,7 @@ sub _split_url {
        $len += $self->write($request->{content});
 
        $len == $content_length
-         or croak(qq/Content-Length missmatch (got: $len expected: $content_length)/);
+         or croak(qq/Content-Length mismatch (got: $len expected: $content_length)/);
 
        return $len;
    }
@@ -4425,7 +4469,7 @@ my @vc_dirs = (
       }
       PTDEBUG && _d('Version check file', $file, 'in', $ENV{PWD});
       return $file;  # in the CWD
-   } 
+   }
 }
 
 sub version_check_time_limit {
@@ -4442,11 +4486,11 @@ sub version_check {
    PTDEBUG && _d('FindBin::Bin:', $FindBin::Bin);
    if ( !$args{force} ) {
       if ( $FindBin::Bin
-           && (-d "$FindBin::Bin/../.bzr"    || 
+           && (-d "$FindBin::Bin/../.bzr"    ||
                -d "$FindBin::Bin/../../.bzr" ||
-               -d "$FindBin::Bin/../.git"    || 
-               -d "$FindBin::Bin/../../.git" 
-              ) 
+               -d "$FindBin::Bin/../.git"    ||
+               -d "$FindBin::Bin/../../.git"
+              )
          ) {
          PTDEBUG && _d("$FindBin::Bin/../.bzr disables --version-check");
          return;
@@ -4470,7 +4514,7 @@ sub version_check {
       PTDEBUG && _d(scalar @$instances_to_check, 'instances to check');
       return unless @$instances_to_check;
 
-      my $protocol = 'https';  
+      my $protocol = 'https';
       eval { require IO::Socket::SSL; };
       if ( $EVAL_ERROR ) {
          PTDEBUG && _d($EVAL_ERROR);
@@ -4654,7 +4698,7 @@ sub get_uuid {
     }
 
     return $uuid;
-}   
+}
 
 sub _generate_uuid {
     return sprintf+($}="%04x")."$}-$}-$}-$}-".$}x3,map rand 65537,0..7;
@@ -4682,7 +4726,7 @@ sub pingback {
    my (%args) = @_;
    my @required_args = qw(url instances);
    foreach my $arg ( @required_args ) {
-      die "I need a $arg arugment" unless $args{$arg};
+      die "I need a $arg argument" unless $args{$arg};
    }
    my $url       = $args{url};
    my $instances = $args{instances};
@@ -4703,7 +4747,7 @@ sub pingback {
    );
    die "Failed to parse server requested programs: $response->{content}"
       if !scalar keys %$items;
-      
+
    my $versions = get_versions(
       items     => $items,
       instances => $instances,
@@ -4750,7 +4794,7 @@ sub encode_client_response {
    my (%args) = @_;
    my @required_args = qw(items versions general_id);
    foreach my $arg ( @required_args ) {
-      die "I need a $arg arugment" unless $args{$arg};
+      die "I need a $arg argument" unless $args{$arg};
    }
    my ($items, $versions, $general_id) = @args{@required_args};
 
@@ -4776,7 +4820,7 @@ sub parse_server_response {
    my (%args) = @_;
    my @required_args = qw(response);
    foreach my $arg ( @required_args ) {
-      die "I need a $arg arugment" unless $args{$arg};
+      die "I need a $arg argument" unless $args{$arg};
    }
    my ($response) = @args{@required_args};
 
@@ -4819,7 +4863,7 @@ sub get_versions {
    my (%args) = @_;
    my @required_args = qw(items);
    foreach my $arg ( @required_args ) {
-      die "I need a $arg arugment" unless $args{$arg};
+      die "I need a $arg argument" unless $args{$arg};
    }
    my ($items) = @args{@required_args};
 
@@ -4968,7 +5012,7 @@ sub get_from_mysql {
    if ($item->{item} eq 'MySQL' && $item->{type} eq 'mysql_variable') {
       @{$item->{vars}} = grep { $_ eq 'version' || $_ eq 'version_comment' } @{$item->{vars}};
    }
- 
+
 
    my @versions;
    my %version_for;
@@ -5422,7 +5466,7 @@ PK columns appended to secondary key is duplicate.
 
 Detects when a suffix of a secondary key is a leftmost prefix of the primary
 key, and treats it as a duplicate key.  Only detects this condition on storage
-engines whose primary keys are clustered (currently InnoDB and solidDB).
+engines whose primary keys are clustered (currently InnoDB, TokuDB and MyRocks).
 
 Clustered storage engines append the primary key columns to the leaf nodes of
 all secondary keys anyway, so you might consider it redundant to have them
@@ -5689,6 +5733,12 @@ dsn: user; copy: yes
 
 User for login if not current user.
 
+=item * s
+
+dsn: mysql_ssl; copy: yes
+
+Create SSL connection
+
 =back
 
 =head1 ENVIRONMENT
@@ -5703,7 +5753,7 @@ of output.
 
 =head1 ATTENTION
 
-Using <PTDEBUG> might expose passwords. When debug is enabled, all command line 
+Using <PTDEBUG> might expose passwords. When debug is enabled, all command line
 parameters are shown in the output.
 
 =head1 SYSTEM REQUIREMENTS
@@ -5768,7 +5818,7 @@ software from Percona.
 
 =head1 COPYRIGHT, LICENSE, AND WARRANTY
 
-This program is copyright 2011-2021 Percona LLC and/or its affiliates,
+This program is copyright 2011-2024 Percona LLC and/or its affiliates,
 2007-2011 Baron Schwartz.
 
 THIS PROGRAM IS PROVIDED "AS IS" AND WITHOUT ANY EXPRESS OR IMPLIED
@@ -5787,6 +5837,6 @@ Place, Suite 330, Boston, MA  02111-1307  USA.
 
 =head1 VERSION
 
-pt-duplicate-key-checker 3.5.1
+pt-duplicate-key-checker 3.7.0
 
 =cut

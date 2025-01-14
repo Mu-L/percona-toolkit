@@ -116,7 +116,7 @@ sub set_src {
    }
    elsif ( lc $src eq 'right' ) {
       $self->{src_db_tbl} = $self->{right_db_tbl};
-      $self->{dst_db_tbl} = $self->{left_db_tbl}; 
+      $self->{dst_db_tbl} = $self->{left_db_tbl};
    }
    else {
       die "src argument must be either 'left' or 'right'"
@@ -147,7 +147,7 @@ sub dst {
 }
 
 # Sub: _take_action
-#   Call the user-provied actions.  Actions are passed an action statement
+#   Call the user-provided actions.  Actions are passed an action statement
 #   and an optional dbh.  This sub is not called directly; it's called
 #   by <change()> or <process_rows()>.
 #
@@ -164,7 +164,7 @@ sub _take_action {
 }
 
 # Sub: change
-#   Make an action SQL statment for the given parameters if not queueing.
+#   Make an action SQL statement for the given parameters if not queueing.
 #   This sub calls <_take_action()>, passing the action statement and
 #   optional dbh.  If queueing, the parameters are saved and the same work
 #   is done in <process_rows()>.  Queueing does not work with bidirectional
@@ -324,6 +324,16 @@ sub make_UPDATE {
       @cols = $self->sort_cols($row);
    }
    my $types = $self->{tbl_struct}->{type_for};
+
+   # MySQL uses utf8mb4 for all strings in JSON, but
+   # DBD::mysql does not decode it accordingly
+   foreach my $col ( @cols ) {
+      my $is_json = ($types->{$col} || '') =~ m/json/i;
+      if ( $is_json && defined $row->{$col} ) {
+         utf8::decode($row->{$col});
+      }
+   }
+
    return "UPDATE $self->{dst_db_tbl} SET "
       . join(', ', map {
             my $is_hex = ($types->{$_} || '') =~ m/^0x[0-9a-fA-F]+$/i;
@@ -388,7 +398,7 @@ sub make_REPLACE {
 #   A SQL statement
 sub make_row {
    my ( $self, $verb, $row, $cols ) = @_;
-   my @cols; 
+   my @cols;
    if ( my $dbh = $self->{fetch_back} ) {
       my $where = $self->make_where_clause($row, $cols);
       my $sql   = $self->make_fetch_back_query($where);
@@ -402,6 +412,15 @@ sub make_row {
    }
    my $q     = $self->{Quoter};
    my $type_for = $self->{tbl_struct}->{type_for};
+
+   # MySQL uses utf8mb4 for all strings in JSON, but
+   # DBD::mysql does not decode it accordingly
+   foreach my $col ( @cols ) {
+      my $is_json = ($type_for->{$col} || '') =~ m/json/i;
+      if ( $is_json && defined $row->{$col} ) {
+         utf8::decode($row->{$col});
+      }
+   }
 
    return "$verb INTO $self->{dst_db_tbl}("
       . join(', ', map { $q->quote($_) } @cols)
@@ -462,7 +481,8 @@ sub get_changes {
 
 
 # Sub: sort_cols
-#   Sort a row's columns based on their real order in the table.
+#   Sort a row's columns based on their real order in the table, and remove
+#   generated columns.
 #   This requires that the optional tbl_struct arg was passed to <new()>.
 #   If not, the rows are sorted alphabetically.
 #
@@ -474,8 +494,9 @@ sub get_changes {
 sub sort_cols {
    my ( $self, $row ) = @_;
    my @cols;
-   if ( $self->{tbl_struct} ) { 
+   if ( $self->{tbl_struct} ) {
       my $pos = $self->{tbl_struct}->{col_posn};
+      my $is_generated = $self->{tbl_struct}->{is_generated};
       my @not_in_tbl;
       @cols = sort {
             $pos->{$a} <=> $pos->{$b}
@@ -488,6 +509,9 @@ sub sort_cols {
             else {
                1;
             }
+         }
+         grep {
+            !$is_generated->{$_}
          }
          sort keys %$row;
       push @cols, @not_in_tbl if @not_in_tbl;

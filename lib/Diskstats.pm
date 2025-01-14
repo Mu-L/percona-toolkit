@@ -571,9 +571,13 @@ sub design_print_formats {
 sub parse_diskstats_line {
    my ( $self, $line, $block_size ) = @_;
 
-   # Since we assume that device names can't have spaces.
+   # linux kernel source => Documentation/iostats.txt
+   # 2.6+ => 14 fields
+   # 4.18+ => 18 fields
+   # 5.x+ => 20 fields (PT-1887)
+   my @num_fields = (14, 18, 20);
    my @dev_stats = split ' ', $line;
-   return unless @dev_stats == 14;
+   return unless grep {$_ == scalar(@dev_stats)} @num_fields;
 
    my $read_bytes    = $dev_stats[READ_SECTORS]    * $block_size;
    my $written_bytes = $dev_stats[WRITTEN_SECTORS] * $block_size;
@@ -623,7 +627,7 @@ sub parse_from {
    }
    else {
       my $filename = $args{filename} || $self->filename();
-   
+
       open my $fh, "<", $filename
          or die "Cannot parse $filename: $OS_ERROR";
       $lines_read = $self->_parse_from_filehandle(
@@ -642,7 +646,7 @@ sub parse_from {
 #   run of the mill filehandle.
 #
 # Parameters:
-#   filehandle       - 
+#   filehandle       -
 #   sample_callback  - Called each time a sample is processed, passed
 #                      the latest timestamp.
 #
@@ -656,7 +660,7 @@ sub _parse_from_filehandle {
 #   !!!!INTERNAL!!!!!
 #   Reads from the filehandle, either saving the data as needed if dealing
 #   with a diskstats-formatted line, or if it finds a TS line and has a
-#   callback, defering to that.
+#   callback, deferring to that.
 
 sub _parse_and_load_diskstats {
    my ( $self, $fh, $sample_callback ) = @_;
@@ -879,7 +883,7 @@ sub _print_device_if {
       $self->_mark_if_active($dev);
       return $dev if $dev =~ $dev_re;
    }
-   else {   
+   else {
       if ( $self->active_device($dev) ) {
          # If --show-interactive is enabled, or we've seen
          # the device be active at least once.

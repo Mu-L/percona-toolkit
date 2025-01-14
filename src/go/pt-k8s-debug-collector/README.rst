@@ -4,7 +4,7 @@
 :program:`pt-k8s-debug-collector`
 ==================================
 
-Collects debug data (logs, resource statuses etc.) from a k8s/OpenShift cluster. Data is packed into the ``cluster-dump.tar.gz`` archive in the current working directory. 
+Collects debug data (logs, resource statuses etc.) from a k8s/OpenShift cluster. Data is packed into the ``cluster-dump.tar.gz`` archive in the current working directory.
 
 Data that will be collected
 ===========================
@@ -125,31 +125,35 @@ Usage
 Supported Flags
 ================
 
-``--resource`` 
+``--resource``
 
-Targeted custom resource name. Supported values: 
+Targeted custom resource name. Supported values:
 
-* ``pxc`` - PXC 
+* ``pxc`` - PXC
 
 * ``psmdb`` - MongoDB
 
-* ``pg`` - PostgreSQL 
+* ``pg`` - PostgreSQL Operator v1 (deprecated)
+
+* ``pgv2`` - PostgreSQL Operator v2
 
 * ``ps`` - MySQL
 
-* ``none`` - Collect only general Kubernetes data, do not collect anything specific to the particular operator). 
+* ``none`` - Collect only general Kubernetes data, do not collect anything specific to the particular operator).
 
-Default: ``none``
+* ``auto`` - Auto-detect custom resource
 
-``--namespace`` 
+Default: ``auto``
+
+``--namespace``
 
 Targeted namespace. By default data will be collected from all namespaces
 
-``--cluster`` 
+``--cluster``
 
 Targeted cluster. By default data from all available clusters to be collected
 
-``--kubeconfig`` 
+``--kubeconfig``
 
 Path to kubeconfig. Default configuration be used if none specified
 
@@ -185,3 +189,8 @@ On Kubernetes 1.21 - 1.24 warning is printed:
       resourceVersion: ""
 
 This warning is harmless and does not affect data collection. We will remove podsecuritypolicies once everyone upgrade to Kubernetes 1.25 or newer. Before that we advise to ignore this warning.
+
+Authors
+=======
+
+Max Dudin, Andrii Dema, Carlos Salguero, Sveta Smirnova

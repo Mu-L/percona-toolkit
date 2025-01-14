@@ -14,6 +14,8 @@ Architecture | CPU = 64-bit, OS = 64-bit
       Speeds | 4x2043.942
       Models | 4xIntel(R) Core(TM) i7-8565U CPU @ 1.80GHz
       Caches | 4x8192 KB
+  Designation               Configuration                  Size     Associativity
+  ========================= ============================== ======== ======================
 # Memory #####################################################
          Total | 3.7G
           Free | 2.9G
@@ -74,7 +76,7 @@ Architecture | CPU = 64-bit, OS = 64-bit
   tmpfs       379M   0% tmpfs    ro,nosuid,nodev,noexec,seclabel,mode=755                                  /run/user/1000
 # Disk Schedulers And Queue Size #############################
          sda | [noop] 128
-# Disk Partioning ############################################
+# Disk Partitioning ##########################################
 Device       Type      Start        End               Size
 ============ ==== ========== ========== ==================
 /dev/sda     Disk                              42949672960
@@ -158,5 +160,4 @@ Unable to collect information
    0  0     0    0     0     0    150    100   0   0 100   0   0
    0  0     0    0     0     0    125    100   0   0 100   0   0
 # Memory management ##########################################
-Transparent huge pages are enabled.
 # The End ####################################################
