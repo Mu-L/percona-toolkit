@@ -32,17 +32,27 @@ require "$trunk/bin/pt-online-schema-change";
 my $dp = new DSNParser(opts=>$dsn_opts);
 my $sb = new Sandbox(basedir => '/tmp', DSNParser => $dp);
 
-my $master3_port   = 2900;
-my $master_basedir = "/tmp/$master3_port";
+my $source3_port   = 2900;
+my $source_basedir = "/tmp/$source3_port";
 
-diag(`$trunk/sandbox/stop-sandbox $master3_port >/dev/null`);
-diag(`$trunk/sandbox/start-sandbox master $master3_port >/dev/null`);
+diag(`$trunk/sandbox/stop-sandbox $source3_port >/dev/null`);
+diag(`$trunk/sandbox/start-sandbox source $source3_port >/dev/null`);
 
-my $dbh3 = $sb->get_dbh_for("master3");
-my $dsn3 = $sb->dsn_for("master3");
+my $new_dir='/tmp/tdir';
+diag(`rm -rf $new_dir`);
+diag(`mkdir -p $new_dir`);
+
+if ($sandbox_version ge '8.0') {
+    diag(`/tmp/$source3_port/stop >/dev/null`);
+    diag(`echo "innodb_directories='$new_dir'" >> /tmp/$source3_port/my.sandbox.cnf`);
+    diag(`/tmp/$source3_port/start >/dev/null`);
+}
+
+my $dbh3 = $sb->get_dbh_for("source3");
+my $dsn3 = $sb->dsn_for("source3");
 
 if ( !$dbh3 ) {
-    plan skip_all => 'Cannot connect to sandbox master';
+    plan skip_all => 'Cannot connect to sandbox source';
 }
 
 # The sandbox servers run with lock_wait_timeout=3 and it's not dynamic
@@ -53,18 +63,14 @@ my $output;
 my $exit_status;
 
 diag("1");
-$sb->load_file('master3', "t/pt-online-schema-change/samples/pt-244.sql");
+$sb->load_file('source3', "t/pt-online-schema-change/samples/pt-244.sql");
 
 my $num_rows = 1000;
 diag("Loading $num_rows into the table. This might take some time.");
-diag(`util/mysql_random_data_load --host=127.0.0.1 --port=$master3_port --user=msandbox --password=msandbox test t3 $num_rows`);
+diag(`util/mysql_random_data_load --host=127.0.0.1 --port=$source3_port --user=msandbox --password=msandbox test t3 $num_rows`);
 diag("$num_rows rows loaded. Starting tests.");
 
 $dbh3->do("FLUSH TABLES");
-
-my $new_dir='/tmp/tdir';
-diag(`rm -rf $new_dir`);
-diag(`mkdir -p $new_dir`);
 
 diag("2");
 ($output, $exit_status) = full_output(
@@ -114,6 +120,6 @@ $dbh3->do("DROP DATABASE IF EXISTS test");
 # Done.
 # #############################################################################
 $sb->wipe_clean($dbh3);
-diag(`$trunk/sandbox/stop-sandbox $master3_port >/dev/null`);
+diag(`$trunk/sandbox/stop-sandbox $source3_port >/dev/null`);
 ok($sb->ok(), "Sandbox servers") or BAIL_OUT(__FILE__ . " broke the sandbox");
 done_testing;

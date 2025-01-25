@@ -35,7 +35,7 @@ Architecture | CPU = 32-bit, OS = 32-bit
          hda | [cfq] 128
          hdc | [cfq] 128
          md0 | UNREADABLE
-# Disk Partioning ############################################
+# Disk Partitioning ##########################################
 Device       Type      Start        End               Size
 ============ ==== ========== ========== ==================
 /dev/hda     Disk                               8589934592
@@ -81,5 +81,4 @@ Unable to collect information
    1  0     0    0     0     0   1000     35  80  20   0   0   0
    1  0     0    0     0     0    900     45  62  38   0   0   0
 # Memory management ##########################################
-Transparent huge pages are enabled.
 # The End ####################################################

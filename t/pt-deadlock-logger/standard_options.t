@@ -17,14 +17,14 @@ require "$trunk/bin/pt-deadlock-logger";
 
 my $dp   = new DSNParser(opts=>$dsn_opts);
 my $sb   = new Sandbox(basedir => '/tmp', DSNParser => $dp);
-my $dbh = $sb->get_dbh_for('master');
+my $dbh = $sb->get_dbh_for('source');
 
 if ( !$dbh ) {
-   plan skip_all => 'Cannot connect to sandbox master';
+   plan skip_all => 'Cannot connect to sandbox source';
 }
 
 my $output;
-my $dsn  = $sb->dsn_for('master');
+my $dsn  = $sb->dsn_for('source');
 my @args = ($dsn, qw(--iterations 1));
 
 $sb->wipe_clean($dbh);
@@ -78,12 +78,10 @@ unlink $pid_file if -f $pid_file;
 # #############################################################################
 $dbh->do('USE test');
 $dbh->do('DROP TABLE IF EXISTS deadlocks');
-$sb->load_file('master', 't/pt-deadlock-logger/samples/deadlocks_tbl.sql', 'test');
+$sb->load_file('source', 't/pt-deadlock-logger/samples/deadlocks_tbl.sql', 'test');
 
 $output = `$trunk/bin/pt-deadlock-logger $dsn --dest D=test,t=deadlocks --daemonize --run-time 10 --interval 1 --pid $pid_file 1>/dev/null 2>/dev/null`;
 
-#REMOVEME
-`echo "test 3" >>/tmp/REMOVEME`;
 PerconaTest::wait_for_files($pid_file);
 
 $output = `ps x | grep 'pt-deadlock-logger $dsn' | grep -v grep`;
@@ -93,8 +91,6 @@ like(
    'It lives daemonized'
 ) or diag($output);
 
-#REMOVEME
-`echo "test 4" >>/tmp/REMOVEME`;
 my ($pid) = $output =~ /(\d+)/;
 
 ok(

@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	TOOLNAME = "pt-mongodb-summary"
+	toolname = "pt-mongodb-summary"
 
 	DefaultAuthDB             = "admin"
 	DefaultHost               = "mongodb://localhost:27017"
@@ -55,10 +55,11 @@ const (
 
 //nolint:gochecknoglobals
 var (
-	Build     string = "2020-04-23"
-	GoVersion string = "1.14.1"
-	Version   string = "3.5.1"
-	Commit    string
+	// We do not set anything here, these variables are defined by the Makefile
+	Build     string //nolint
+	GoVersion string //nolint
+	Version   string //nolint
+	Commit    string //nolint
 
 	defaultConnectionTimeout = 3 * time.Second
 	directConnection         = true
@@ -193,7 +194,7 @@ func main() {
 	log.SetLevel(logLevel)
 
 	if opts.Version {
-		fmt.Println(TOOLNAME)
+		fmt.Println(toolname)
 		fmt.Printf("Version %s\n", Version)
 		fmt.Printf("Build: %s using %s\n", Build, GoVersion)
 		fmt.Printf("Commit: %s\n", Commit)
@@ -201,9 +202,9 @@ func main() {
 		return
 	}
 
-	conf := config.DefaultConfig(TOOLNAME)
+	conf := config.DefaultConfig(toolname)
 	if !conf.GetBool("no-version-check") && !opts.NoVersionCheck {
-		advice, err := versioncheck.CheckUpdates(TOOLNAME, Version)
+		advice, err := versioncheck.CheckUpdates(toolname, Version)
 		if err != nil {
 			log.Infof("cannot check version updates: %s", err.Error())
 		} else if advice != "" {
@@ -373,14 +374,14 @@ func getHostInfo(ctx context.Context, client *mongo.Client) (*hostInfo, error) {
 	}
 
 	cmdOpts := proto.CommandLineOptions{}
-	query := primitive.D{{Key: "getCmdLineOpts", Value: 1}, {Key: "recordStats", Value: 1}}
+	query := primitive.D{{Key: "getCmdLineOpts", Value: 1}}
 	err := client.Database("admin").RunCommand(ctx, query).Decode(&cmdOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get command line options")
 	}
 
 	ss := proto.ServerStatus{}
-	query = primitive.D{{Key: "serverStatus", Value: 1}, {Key: "recordStats", Value: 1}}
+	query = primitive.D{{Key: "serverStatus", Value: 1}}
 	if err := client.Database("admin").RunCommand(ctx, query).Decode(&ss); err != nil {
 		return nil, errors.Wrap(err, "GetHostInfo.serverStatus")
 	}
@@ -527,7 +528,6 @@ func getSecuritySettings(ctx context.Context, client *mongo.Client, ver string) 
 	cmdOpts := proto.CommandLineOptions{}
 	err = client.Database("admin").RunCommand(ctx, primitive.D{
 		{Key: "getCmdLineOpts", Value: 1},
-		{Key: "recordStats", Value: 1},
 	}).Decode(&cmdOpts)
 	if err != nil {
 		return nil, errors.Wrap(err, "cannot get command line options")
@@ -632,7 +632,6 @@ func getOpCountersStats(ctx context.Context, client *mongo.Client, count int,
 
 		err := client.Database("admin").RunCommand(ctx, primitive.D{
 			{Key: "serverStatus", Value: 1},
-			{Key: "recordStats", Value: 1},
 		}).Decode(&ss)
 		if err != nil {
 			return nil, err
@@ -936,7 +935,7 @@ func parseFlags() (*cliOptions, error) {
 	)
 
 	gop.IntVarLong(&opts.RunningOpsInterval, "running-ops-interval", 'i',
-		fmt.Sprintf("Interval to wait betwwen running ops samples in milliseconds. Default %d milliseconds",
+		fmt.Sprintf("Interval to wait between running ops samples in milliseconds. Default %d milliseconds",
 			opts.RunningOpsInterval),
 	)
 

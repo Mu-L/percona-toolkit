@@ -270,7 +270,7 @@ sub _iterate_files {
       }
       elsif ($self->{db} && $chunk =~ m/CREATE TABLE/) {
          if ($chunk =~ m/DROP VIEW IF EXISTS/) {
-            # Tables that are actually views have this DROP statment in the
+            # Tables that are actually views have this DROP statement in the
             # chunk just before the CREATE TABLE.  We don't want views.
             PTDEBUG && _d('Table is a VIEW, skipping');
             next CHUNK;
@@ -495,7 +495,7 @@ sub table_is_allowed {
    # then we'll get d1 tables when the user only wants d2 tables.  So when
    # a table passes allow filters, reaching this point, meaning it is allowed,
    # we make this final to check to see if it's allowed in any database (*)
-   # or allowed in the specific database that the user qualifed the table with.
+   # or allowed in the specific database that the user qualified the table with.
    # The first two checks are to prevent auto-vivifying the filters which will
    # cause bad results (see a similar comment in _make_filters()).
    if ( $filter->{'tables'}

@@ -11,7 +11,6 @@ Vendor:    Percona
 URL:       http://www.percona.com/software/percona-toolkit/
 Source:    percona-toolkit-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-%{release}-root
-BuildArch: x86_64
 
 BuildRequires: perl(ExtUtils::MakeMaker) make
 Requires:  perl(DBI) >= 1.13, perl(DBD::mysql) >= 1.0, perl(Time::HiRes), perl(IO::Socket::SSL), perl(Digest::MD5), perl(Term::ReadKey)
@@ -28,7 +27,7 @@ MySQL and system tasks that are too difficult or complex to perform manually.
 These tools are ideal alternatives to private or "one-off" scripts because
 they are professionally developed, formally tested, and fully documented.
 They are also fully self-contained, so installation is quick and easy and
-no libraries are installed. 
+no libraries are installed.
 
 Percona Toolkit is developed and supported by Percona.  For more
 information and other free, open-source software developed by Percona,
@@ -39,11 +38,13 @@ visit http://www.percona.com/software/.
 
 %build
 %{__perl} Makefile.PL INSTALLDIRS=vendor < /dev/null
-make %{?_smp_mflags}
+#sed -i '499d' Makefile
+VERSION=3.5.7 make %{?_smp_mflags}
 
 %install
 rm -rf $RPM_BUILD_ROOT
-make pure_install PERL_INSTALL_ROOT=$RPM_BUILD_ROOT
+VERSION=3.5.7 make pure_install PERL_INSTALL_ROOT=$RPM_BUILD_ROOT
+for file in $(diff -rq bin/ $RPM_BUILD_ROOT/usr/bin | awk '{print $NF}'); do cp bin/$file $RPM_BUILD_ROOT/usr/bin || true; done
 find $RPM_BUILD_ROOT -type f -name .packlist -exec rm -f {} ';'
 find $RPM_BUILD_ROOT -type d -depth -exec rmdir {} 2>/dev/null ';'
 find $RPM_BUILD_ROOT -type f -name 'percona-toolkit.pod' -exec rm -f {} ';'

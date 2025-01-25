@@ -63,7 +63,7 @@ func TestReadConfig(t *testing.T) {
 
 	// stringvar=some string var having = and #
 	if got := conf.GetString("stringvar"); got != "some string var having = and #" {
-		t.Errorf("string var incorect value; got %s", got)
+		t.Errorf("string var incorrect value; got %s", got)
 	}
 }
 
@@ -115,12 +115,12 @@ func TestOverrideConfig(t *testing.T) {
 	}
 
 	if got := conf.GetString("stringvar"); got != "some other string" {
-		t.Errorf("string var incorect value; got %s", got)
+		t.Errorf("string var incorrect value; got %s", got)
 	}
 
 	// This exists only in file2
 	if got := conf.GetString("newstring"); got != "a new string" {
-		t.Errorf("string var incorect value; got %s", got)
+		t.Errorf("string var incorrect value; got %s", got)
 	}
 
 	if got := conf.GetInt64("anotherint"); got != 8 {
@@ -129,14 +129,14 @@ func TestOverrideConfig(t *testing.T) {
 }
 
 func TestDefaultFiles(t *testing.T) {
-	user, _ := user.Current()
+	current, _ := user.Current()
 	toolname := "pt-testing"
 
 	want := []string{
 		"/etc/percona-toolkit/percona-toolkit.conf",
 		fmt.Sprintf("/etc/percona-toolkit/%s.conf", toolname),
-		fmt.Sprintf("%s/.percona-toolkit.conf", user.HomeDir),
-		fmt.Sprintf("%s/.%s.conf", user.HomeDir, toolname),
+		fmt.Sprintf("%s/.percona-toolkit.conf", current.HomeDir),
+		fmt.Sprintf("%s/.%s.conf", current.HomeDir, toolname),
 	}
 
 	got, err := DefaultConfigFiles(toolname)

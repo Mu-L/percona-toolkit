@@ -19,7 +19,7 @@
 # ###########################################################################
 
 # Package: report_system_info
-# 
+#
 
 set -u
 
@@ -28,7 +28,7 @@ set -u
 # These are called from within report_system_summary() and are separated so
 # they can be tested easily.
 # ##############################################################################
-   
+
 # ##############################################################################
 # Parse Linux's /proc/cpuinfo.
 # ##############################################################################
@@ -239,6 +239,27 @@ parse_dmidecode_mem_devices () { local PTFUNCNAME=parse_dmidecode_mem_devices;
 }
 
 # ##############################################################################
+# Parse CPU cache from the output of 'dmidecode'.
+# ##############################################################################
+parse_dmidecode_cache_info () { local PTFUNCNAME=parse_dmidecode_cache_info;
+   local file="$1"
+
+   [ -e "$file" ] || return
+
+   echo "  Designation               Configuration                  Size     Associativity"
+   echo "  ========================= ============================== ======== ======================"
+   sed    -e '/./{H;$!d;}' \
+          -e 'x;/Cache Information\n/!d;' \
+          -e 's/: /:/g' \
+          -e 's/</{/g' \
+          -e 's/>/}/g' \
+          -e 's/[ \t]*\n/\n/g' \
+       "${file}" \
+       | awk -F: '/Socket Designation|Configuration|Installed Size/{printf("|%s", $2)}/^[\t ]+Associativity/{print "|" $2}' \
+       | awk -F'|' '{printf("  %-25s %-30s %-8s %-22s\n", $2, $3, $4, $5);}'
+}
+
+# ##############################################################################
 # Parse the output of 'numactl'.
 # ##############################################################################
 parse_numactl () { local PTFUNCNAME=parse_numactl;
@@ -254,13 +275,13 @@ parse_numactl () { local PTFUNCNAME=parse_numactl;
           -e '/node[[:digit:]]/p' \
        "${file}" \
        | sort -r \
-       | awk  '$1 == cnode { 
+       | awk  '$1 == cnode {
                         if (NF > 4) { for(i=3;i<=NF;i++){printf("%s ", $i)} printf "\n" }
                         else { printf("%-12s", $3" "$4); }
                      }
-               $1 != cnode { cnode = $1; printf("   %-8s", $1); printf("%-12s", $3" "$4); }' 
+               $1 != cnode { cnode = $1; printf("   %-8s", $1); printf("%-12s", $3" "$4); }'
 
-  echo 
+  echo
 }
 
 # ##############################################################################
@@ -863,6 +884,10 @@ section_Processor () {
       parse_psrinfo_cpus "$data_dir/psrinfo_minus_v"
       # TODO: prtconf -v actually prints the CPU model name etc.
    fi
+
+   if [ -s "$data_dir/dmidecode" ]; then
+      parse_dmidecode_cache_info "$data_dir/dmidecode"
+   fi
 }
 
 section_Memory () {
@@ -901,7 +926,7 @@ section_Memory () {
       name_val "Numa Nodes" "$(get_var "numa-available" "$data_dir/summary")"
       name_val "Numa Policy" "$(get_var "numa-policy" "$data_dir/summary")"
       name_val "Preferred Node" "$(get_var "numa-preferred-node" "$data_dir/summary")"
-      
+
       parse_numactl "$data_dir/numactl"
    fi
 
@@ -928,7 +953,7 @@ report_fio_minus_a () {
    local file="$1"
 
    name_val "fio Driver" "$(get_var driver_version "$file")"
-   
+
    local adapters="$( get_var "adapters" "$file" )"
    for adapter in $( echo $adapters | awk '{for (i=1; i<=NF; i++) print $i;}' ); do
       local adapter_for_output="$(echo "$adapter" | sed 's/::[0-9]*$//' | tr ':' ' ')"
@@ -1009,7 +1034,7 @@ report_system_summary () { local PTFUNCNAME=report_system_summary;
       section "Fusion-io Card"
       report_fio_minus_a "$data_dir/fusion-io_card"
    fi
-   
+
    if [ -s "$data_dir/mounted_fs" ]; then
       section "Mounted Filesystems"
       parse_filesystems "$data_dir/mounted_fs" "${platform}"
@@ -1024,7 +1049,7 @@ report_system_summary () { local PTFUNCNAME=report_system_summary;
          name_val "${disk}" "${scheduler:-"UNREADABLE"}"
       done
 
-      section "Disk Partioning"
+      section "Disk Partitioning"
       parse_fdisk "$data_dir/partitioning"
 
       section "Kernel Inode State"
@@ -1112,7 +1137,7 @@ report_system_summary () { local PTFUNCNAME=report_system_summary;
                                        "$platform"
 
    section "Memory management"
-   report_transparent_huge_pages
+   report_transparent_huge_pages "$data_dir/transparent_hugepage"
 
    # ########################################################################
    # All done.  Signal the end so it's explicit.
@@ -1121,17 +1146,15 @@ report_system_summary () { local PTFUNCNAME=report_system_summary;
 }
 
 report_transparent_huge_pages () {
+   local file="$1"
 
-  if [ -f /sys/kernel/mm/transparent_hugepage/enabled ]; then
-    CONTENT_TRANSHP=$(</sys/kernel/mm/transparent_hugepage/enabled)
-    STATUS_THP_SYSTEM=$(echo $CONTENT_TRANSHP | grep -cv '\[never\]')
-  fi
-  if [ $STATUS_THP_SYSTEM = 0 ]; then
-    echo "Transparent huge pages are currently disabled on the system."
-  else
-    echo "Transparent huge pages are enabled."
-  fi
+   [ -e "$file" ] || return
 
+   if [ $(grep -cv '\[never\]' $file) = 0 ]; then
+      echo "Transparent huge pages are currently disabled on the system."
+   else
+      echo "Transparent huge pages are enabled."
+   fi
 }
 
 # ###########################################################################
